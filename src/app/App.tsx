@@ -8,16 +8,20 @@ import { createImportSummary, parseBackupPayload } from '../domain/backup';
 import {
   clearAllData,
   clearDemoData,
+  clearDeepSeekApiKey,
   deleteMistake,
   exportBackup,
   generateDemoData,
   getAllData,
   importBackup,
+  saveDeepSeekApiKey,
   saveMistake,
   saveStudyLog,
+  updateMistakeAiSuggestion,
   updateMistakeWithReview
 } from '../data/repository';
 import { toDateKey } from '../domain/date';
+import { generateAiReviewSuggestion } from '../services/aiService';
 
 type Page = 'dashboard' | 'add' | 'review' | 'mistakes' | 'stats' | 'settings';
 
@@ -111,13 +115,22 @@ function App() {
               mistakes={data.mistakes}
               imageMap={imageMap}
               selectedMistakeId={selectedMistakeId}
+              deepSeekApiKey={data.settings?.deepSeekApiKey}
               onSelect={setSelectedMistakeId}
               onDeleted={refresh}
+              onChanged={refresh}
               setMessage={setMessage}
             />
           )}
           {page === 'stats' && <StatsPanel stats={stats} />}
-          {page === 'settings' && <SettingsPanel demoCount={data.mistakes.filter((mistake) => mistake.isDemo).length} onChanged={refresh} setMessage={setMessage} />}
+          {page === 'settings' && (
+            <SettingsPanel
+              demoCount={data.mistakes.filter((mistake) => mistake.isDemo).length}
+              hasDeepSeekApiKey={Boolean(data.settings?.deepSeekApiKey)}
+              onChanged={refresh}
+              setMessage={setMessage}
+            />
+          )}
         </main>
 
         <aside className="desktop-aside">
@@ -288,6 +301,7 @@ function AddMistake({
   const [reason, setReason] = useState(ERROR_REASONS[2]);
   const [reflection, setReflection] = useState('');
   const [note, setNote] = useState('');
+  const [solutionText, setSolutionText] = useState('');
   const [image, setImage] = useState<MistakeImage | undefined>();
   const [saving, setSaving] = useState(false);
   const [lastNextReviewAt, setLastNextReviewAt] = useState<string | null>(null);
@@ -334,6 +348,7 @@ function AddMistake({
       reason,
       reflection: reflection.trim(),
       note: note.trim() || undefined,
+      solutionText: solutionText.trim() || undefined,
       questionImageId: image?.id,
       createdAt: now,
       updatedAt: now,
@@ -354,6 +369,7 @@ function AddMistake({
     });
     setReflection('');
     setNote('');
+    setSolutionText('');
     setImage(undefined);
     setLastNextReviewAt(mistake.nextReviewAt);
     setSaving(false);
@@ -403,6 +419,13 @@ function AddMistake({
         <label className="field">
           <span>补充思路、页码或提醒</span>
           <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="可空，别让录入变重。" rows={2} />
+        </label>
+      </section>
+      <section className="form-section">
+        <p className="section-kicker">7. 解法文字</p>
+        <label className="field">
+          <span>可粘贴答案要点或自己的解法</span>
+          <textarea value={solutionText} onChange={(event) => setSolutionText(event.target.value)} placeholder="只保存文字，不识别图片。" rows={3} />
         </label>
       </section>
       <button className="primary-button" disabled={saving}>
@@ -550,15 +573,19 @@ function MistakeList({
   mistakes,
   imageMap,
   selectedMistakeId,
+  deepSeekApiKey,
   onSelect,
   onDeleted,
+  onChanged,
   setMessage
 }: {
   mistakes: Mistake[];
   imageMap: Map<string, MistakeImage>;
   selectedMistakeId: string | null;
+  deepSeekApiKey?: string;
   onSelect: (id: string | null) => void;
   onDeleted: () => Promise<void>;
+  onChanged: () => Promise<void>;
   setMessage: (value: string) => void;
 }) {
   const [subject, setSubject] = useState('all');
@@ -618,7 +645,17 @@ function MistakeList({
         </select>
       </div>
 
-      {selected && <MistakeDetail mistake={selected} image={selected.questionImageId ? imageMap.get(selected.questionImageId) : undefined} onClose={() => onSelect(null)} onDelete={remove} />}
+      {selected && (
+        <MistakeDetail
+          mistake={selected}
+          image={selected.questionImageId ? imageMap.get(selected.questionImageId) : undefined}
+          deepSeekApiKey={deepSeekApiKey}
+          onClose={() => onSelect(null)}
+          onDelete={remove}
+          onChanged={onChanged}
+          setMessage={setMessage}
+        />
+      )}
 
       {filtered.length === 0 ? (
         <Empty title="暂无错题" text="从一道开始。" />
@@ -638,14 +675,39 @@ function MistakeList({
 function MistakeDetail({
   mistake,
   image,
+  deepSeekApiKey,
   onClose,
-  onDelete
+  onDelete,
+  onChanged,
+  setMessage
 }: {
   mistake: Mistake;
   image?: MistakeImage;
+  deepSeekApiKey?: string;
   onClose: () => void;
   onDelete: (mistake: Mistake) => void;
+  onChanged: () => Promise<void>;
+  setMessage: (value: string) => void;
 }) {
+  const [aiLoading, setAiLoading] = useState(false);
+
+  async function generateAiSuggestion() {
+    setAiLoading(true);
+    try {
+      const suggestion = await generateAiReviewSuggestion(mistake, deepSeekApiKey ?? '');
+      await updateMistakeAiSuggestion(mistake.id, {
+        ...suggestion,
+        generatedAt: new Date().toISOString()
+      });
+      await onChanged();
+      setMessage('AI 复盘建议已生成');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'AI 建议生成失败');
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   return (
     <article className="panel detail">
       <div className="row-between">
@@ -660,9 +722,50 @@ function MistakeDetail({
       <p><strong>错因：</strong>{mistake.reason}</p>
       <p><strong>复盘：</strong>{mistake.reflection}</p>
       {mistake.note && <p><strong>备注：</strong>{mistake.note}</p>}
+      {mistake.solutionText && <p><strong>解法文字：</strong>{mistake.solutionText}</p>}
       <p><strong>下次复盘：</strong>{mistake.nextReviewAt ? toDateKey(mistake.nextReviewAt) : '无'}</p>
+      <AiSuggestionCard mistake={mistake} loading={aiLoading} onGenerate={generateAiSuggestion} />
       <button className="danger-button" onClick={() => onDelete(mistake)}>删除错题</button>
     </article>
+  );
+}
+
+function AiSuggestionCard({
+  mistake,
+  loading,
+  onGenerate
+}: {
+  mistake: Mistake;
+  loading: boolean;
+  onGenerate: () => void;
+}) {
+  const hasSuggestion = Boolean(mistake.aiSummary || mistake.aiAdvice || mistake.aiTags?.length);
+
+  return (
+    <section className="ai-card">
+      <div className="row-between">
+        <h2>AI 复盘建议</h2>
+        <button className="text-button" onClick={onGenerate} disabled={loading}>
+          {loading ? '生成中...' : hasSuggestion ? '重新生成' : '生成 AI 复盘建议'}
+        </button>
+      </div>
+      {hasSuggestion ? (
+        <div className="ai-content">
+          <p><strong>错因总结：</strong>{mistake.aiSummary}</p>
+          <p><strong>下次建议：</strong>{mistake.aiAdvice}</p>
+          {mistake.aiTags && mistake.aiTags.length > 0 && (
+            <div className="tag-list">
+              {mistake.aiTags.map((tag) => (
+                <span key={tag}>{tag}</span>
+              ))}
+            </div>
+          )}
+          {mistake.aiGeneratedAt && <p className="muted">生成时间：{new Date(mistake.aiGeneratedAt).toLocaleString('zh-CN')}</p>}
+        </div>
+      ) : (
+        <p className="muted">还没有 AI 建议，可以根据当前错因生成一条复盘建议。</p>
+      )}
+    </section>
   );
 }
 
@@ -706,15 +809,18 @@ function Ranking({ title, items }: { title: string; items: { label: string; coun
 
 function SettingsPanel({
   demoCount,
+  hasDeepSeekApiKey,
   onChanged,
   setMessage
 }: {
   demoCount: number;
+  hasDeepSeekApiKey: boolean;
   onChanged: () => Promise<void>;
   setMessage: (value: string) => void;
 }) {
   const [summary, setSummary] = useState<ReturnType<typeof createImportSummary> | null>(null);
   const [pendingPayload, setPendingPayload] = useState<BackupPayload | null>(null);
+  const [deepSeekApiKey, setDeepSeekApiKey] = useState('');
 
   async function downloadBackup() {
     const payload = await exportBackup();
@@ -776,9 +882,46 @@ function SettingsPanel({
     setMessage('示例数据已清除');
   }
 
+  async function saveAiKey() {
+    if (!deepSeekApiKey.trim()) {
+      setMessage('请输入 DeepSeek API Key');
+      return;
+    }
+    await saveDeepSeekApiKey(deepSeekApiKey);
+    setDeepSeekApiKey('');
+    await onChanged();
+    setMessage('DeepSeek API Key 已保存');
+  }
+
+  async function clearAiKey() {
+    await clearDeepSeekApiKey();
+    setDeepSeekApiKey('');
+    await onChanged();
+    setMessage('DeepSeek API Key 已清除');
+  }
+
   return (
     <section className="stack">
       <BackupNotice />
+
+      <article className="panel ai-settings">
+        <h2>AI 设置</h2>
+        <p className="muted">API Key 仅保存在当前浏览器本地，不会写入代码或提交到 Git。</p>
+        <label className="field">
+          <span>DeepSeek API Key</span>
+          <input
+            type="password"
+            value={deepSeekApiKey}
+            onChange={(event) => setDeepSeekApiKey(event.target.value)}
+            placeholder={hasDeepSeekApiKey ? '已保存，可输入新 Key 覆盖' : '请输入 DeepSeek API Key'}
+            autoComplete="off"
+          />
+        </label>
+        <div className="action-grid">
+          <button onClick={saveAiKey}>保存 API Key</button>
+          <button onClick={clearAiKey}>清除 API Key</button>
+        </div>
+      </article>
 
       <article className="panel">
         <h2>JSON 备份</h2>

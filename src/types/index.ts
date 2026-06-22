@@ -28,6 +28,7 @@ export type Mistake = {
   reason: string;
   reflection: string;
   note?: string;
+  solutionText?: string;
   questionImageId?: string;
   createdAt: string;
   updatedAt: string;
@@ -67,6 +68,7 @@ export type Settings = {
   dailyGoal: number;
   createdAt: string;
   updatedAt: string;
+  deepSeekApiKey?: string;
 };
 
 export type BackupPayload = {

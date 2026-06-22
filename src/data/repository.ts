@@ -75,6 +75,23 @@ export async function updateMistakeWithReview(mistake: Mistake, record: ReviewRe
   await tx.done;
 }
 
+export async function updateMistakeAiSuggestion(
+  id: string,
+  suggestion: { summary: string; advice: string; tags: string[]; generatedAt: string }
+) {
+  const db = await getDb();
+  const mistake = await db.get('mistakes', id);
+  if (!mistake) throw new Error('错题不存在');
+  await db.put('mistakes', {
+    ...mistake,
+    aiSummary: suggestion.summary,
+    aiAdvice: suggestion.advice,
+    aiTags: suggestion.tags,
+    aiGeneratedAt: suggestion.generatedAt,
+    updatedAt: suggestion.generatedAt
+  });
+}
+
 export async function deleteMistake(id: string) {
   const db = await getDb();
   const mistake = await db.get('mistakes', id);
@@ -159,6 +176,35 @@ export async function saveSettings(settings: Settings) {
   await db.put('settings', settings);
 }
 
+export async function saveDeepSeekApiKey(apiKey: string) {
+  const db = await getDb();
+  const existing = await db.get('settings', 'default');
+  const now = new Date().toISOString();
+  await db.put('settings', {
+    id: 'default',
+    dailyGoal: existing?.dailyGoal ?? 20,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    deepSeekApiKey: apiKey.trim()
+  });
+}
+
+export async function clearDeepSeekApiKey() {
+  const db = await getDb();
+  const existing = await db.get('settings', 'default');
+  if (!existing) return;
+  await db.put('settings', {
+    ...withoutDeepSeekApiKey(existing),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function withoutDeepSeekApiKey(settings: Settings): Settings {
+  const safeSettings = { ...settings };
+  delete safeSettings.deepSeekApiKey;
+  return safeSettings;
+}
+
 export async function exportBackup(): Promise<BackupPayload> {
   const data = await getAllData();
   const images = await Promise.all(
@@ -176,7 +222,7 @@ export async function exportBackup(): Promise<BackupPayload> {
       images,
       reviewRecords: data.reviewRecords,
       studyLogs: data.studyLogs,
-      settings: data.settings
+      settings: data.settings ? withoutDeepSeekApiKey(data.settings) : null
     }
   };
 }
@@ -203,7 +249,7 @@ export async function importBackup(payload: BackupPayload, clearFirst: boolean) 
   );
   await Promise.all(payload.data.reviewRecords.map((record) => tx.objectStore('reviewRecords').put(record)));
   await Promise.all(payload.data.studyLogs.map((log) => tx.objectStore('studyLogs').put(log)));
-  if (payload.data.settings) await tx.objectStore('settings').put(payload.data.settings);
+  if (payload.data.settings) await tx.objectStore('settings').put(withoutDeepSeekApiKey(payload.data.settings));
   await tx.done;
 }
 

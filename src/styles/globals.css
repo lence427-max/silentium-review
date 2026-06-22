@@ -63,7 +63,9 @@ main,
 .field,
 .image-input,
 .starter-card,
-.backup-note {
+.backup-note,
+.ai-card,
+.ai-settings {
   min-width: 0;
 }
 
@@ -141,7 +143,8 @@ small {
 .success-card,
 .tip-card,
 .starter-card,
-.backup-note {
+.backup-note,
+.ai-card {
   border: 1px solid var(--line);
   background: var(--surface);
   box-shadow: var(--shadow);
@@ -159,7 +162,8 @@ small {
 .success-card,
 .tip-card,
 .starter-card,
-.backup-note {
+.backup-note,
+.ai-card {
   border-radius: 24px;
   padding: 18px;
 }
@@ -356,6 +360,7 @@ small {
   color: var(--muted);
 }
 
+.field input,
 .field textarea,
 .filters select {
   width: 100%;
@@ -364,6 +369,11 @@ small {
   background: var(--surface-strong);
   color: #263850;
   outline: none;
+}
+
+.field input {
+  min-height: 44px;
+  padding: 0 14px;
 }
 
 .field textarea {
@@ -451,6 +461,12 @@ small {
   padding: 0 14px;
 }
 
+.action-grid button:disabled,
+.text-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
 .compact-actions {
   margin-top: 14px;
 }
@@ -487,6 +503,41 @@ small {
 
 .detail p {
   line-height: 1.7;
+}
+
+.ai-card {
+  display: grid;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: none;
+}
+
+.ai-card h2 {
+  margin-bottom: 0;
+}
+
+.ai-content {
+  display: grid;
+  gap: 10px;
+}
+
+.ai-content p {
+  margin-bottom: 0;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-list span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(94, 127, 166, 0.1);
+  color: var(--blue-deep);
+  font-size: 0.88rem;
 }
 
 .review-item {
@@ -821,7 +872,8 @@ small {
   .success-card,
   .tip-card,
   .starter-card,
-  .backup-note {
+  .backup-note,
+  .ai-card {
     border-radius: 20px;
     padding: 15px;
   }
