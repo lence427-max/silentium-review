@@ -69,6 +69,7 @@ export type Settings = {
   createdAt: string;
   updatedAt: string;
   deepSeekApiKey?: string;
+  deepSeekModel?: string;
 };
 
 export type BackupPayload = {

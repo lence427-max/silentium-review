@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Mistake } from '../types';
-import { generateAiReviewSuggestion } from './aiService';
+import { DEFAULT_DEEPSEEK_MODEL, generateAiReviewSuggestion, testDeepSeekConnection } from './aiService';
 
 const mistake: Mistake = {
   id: 'm1',
@@ -65,9 +65,82 @@ describe('aiService', () => {
       })
     );
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.model).toBe(DEFAULT_DEEPSEEK_MODEL);
     const promptText = JSON.stringify(body.messages);
     expect(promptText).toContain('solutionText');
     expect(promptText).not.toContain('questionImageId');
     expect(promptText).not.toContain('blob');
+  });
+
+  it('uses a configured model name when requesting suggestions', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '{"summary":"错因","advice":"建议","tags":["标签"]}' } }]
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await generateAiReviewSuggestion(mistake, { apiKey: 'test-api-key', model: 'deepseek-test-model' });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.model).toBe('deepseek-test-model');
+  });
+
+  it('extracts JSON from a markdown code block response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: '```json\n{"summary":"换元后上下限错误","advice":"先写变量范围再计算","tags":["积分","换元"]}\n```'
+            }
+          }
+        ]
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(generateAiReviewSuggestion(mistake, 'test-api-key')).resolves.toEqual({
+      summary: '换元后上下限错误',
+      advice: '先写变量范围再计算',
+      tags: ['积分', '换元']
+    });
+  });
+
+  it('throws a friendly message for malformed AI JSON', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: '这道题主要是计算错误，下次认真一点。' } }]
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(generateAiReviewSuggestion(mistake, 'test-api-key')).rejects.toThrow('AI 返回格式不稳定，请稍后重新生成');
+  });
+
+  it('includes a short HTTP error reason when DeepSeek rejects the request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: { message: 'Invalid API key' } })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(generateAiReviewSuggestion(mistake, 'test-api-key')).rejects.toThrow('AI 请求失败：Invalid API key');
+  });
+
+  it('tests DeepSeek connectivity with the configured model', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(testDeepSeekConnection({ apiKey: 'test-api-key', model: 'deepseek-test-model' })).resolves.toEqual({ ok: true });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.model).toBe('deepseek-test-model');
   });
 });

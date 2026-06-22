@@ -8,6 +8,7 @@ import {
   generateDemoData,
   getAllData,
   saveDeepSeekApiKey,
+  saveDeepSeekModel,
   saveMistake,
   saveStudyLog,
   updateMistakeAiSuggestion
@@ -82,12 +83,20 @@ describe('repository AI settings and suggestions', () => {
     expect((await getAllData()).settings?.deepSeekApiKey).toBeUndefined();
   });
 
+  it('saves the DeepSeek model name in local settings', async () => {
+    await saveDeepSeekModel('deepseek-test-model');
+
+    expect((await getAllData()).settings?.deepSeekModel).toBe('deepseek-test-model');
+  });
+
   it('does not include the DeepSeek API Key in JSON backups', async () => {
     await saveDeepSeekApiKey('test-local-key');
+    await saveDeepSeekModel('deepseek-test-model');
 
     const payload = await exportBackup();
 
     expect(payload.data.settings?.deepSeekApiKey).toBeUndefined();
+    expect(payload.data.settings?.deepSeekModel).toBe('deepseek-test-model');
   });
 
   it('updates only the AI suggestion fields on a mistake', async () => {

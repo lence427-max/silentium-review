@@ -15,13 +15,14 @@ import {
   getAllData,
   importBackup,
   saveDeepSeekApiKey,
+  saveDeepSeekModel,
   saveMistake,
   saveStudyLog,
   updateMistakeAiSuggestion,
   updateMistakeWithReview
 } from '../data/repository';
 import { toDateKey } from '../domain/date';
-import { generateAiReviewSuggestion } from '../services/aiService';
+import { DEFAULT_DEEPSEEK_MODEL, generateAiReviewSuggestion, testDeepSeekConnection } from '../services/aiService';
 
 type Page = 'dashboard' | 'add' | 'review' | 'mistakes' | 'stats' | 'settings';
 
@@ -116,6 +117,7 @@ function App() {
               imageMap={imageMap}
               selectedMistakeId={selectedMistakeId}
               deepSeekApiKey={data.settings?.deepSeekApiKey}
+              deepSeekModel={data.settings?.deepSeekModel}
               onSelect={setSelectedMistakeId}
               onDeleted={refresh}
               onChanged={refresh}
@@ -127,6 +129,8 @@ function App() {
             <SettingsPanel
               demoCount={data.mistakes.filter((mistake) => mistake.isDemo).length}
               hasDeepSeekApiKey={Boolean(data.settings?.deepSeekApiKey)}
+              savedDeepSeekApiKey={data.settings?.deepSeekApiKey}
+              savedDeepSeekModel={data.settings?.deepSeekModel}
               onChanged={refresh}
               setMessage={setMessage}
             />
@@ -574,6 +578,7 @@ function MistakeList({
   imageMap,
   selectedMistakeId,
   deepSeekApiKey,
+  deepSeekModel,
   onSelect,
   onDeleted,
   onChanged,
@@ -583,6 +588,7 @@ function MistakeList({
   imageMap: Map<string, MistakeImage>;
   selectedMistakeId: string | null;
   deepSeekApiKey?: string;
+  deepSeekModel?: string;
   onSelect: (id: string | null) => void;
   onDeleted: () => Promise<void>;
   onChanged: () => Promise<void>;
@@ -650,6 +656,7 @@ function MistakeList({
           mistake={selected}
           image={selected.questionImageId ? imageMap.get(selected.questionImageId) : undefined}
           deepSeekApiKey={deepSeekApiKey}
+          deepSeekModel={deepSeekModel}
           onClose={() => onSelect(null)}
           onDelete={remove}
           onChanged={onChanged}
@@ -676,6 +683,7 @@ function MistakeDetail({
   mistake,
   image,
   deepSeekApiKey,
+  deepSeekModel,
   onClose,
   onDelete,
   onChanged,
@@ -684,6 +692,7 @@ function MistakeDetail({
   mistake: Mistake;
   image?: MistakeImage;
   deepSeekApiKey?: string;
+  deepSeekModel?: string;
   onClose: () => void;
   onDelete: (mistake: Mistake) => void;
   onChanged: () => Promise<void>;
@@ -692,9 +701,13 @@ function MistakeDetail({
   const [aiLoading, setAiLoading] = useState(false);
 
   async function generateAiSuggestion() {
+    if (aiLoading) return;
     setAiLoading(true);
     try {
-      const suggestion = await generateAiReviewSuggestion(mistake, deepSeekApiKey ?? '');
+      const suggestion = await generateAiReviewSuggestion(mistake, {
+        apiKey: deepSeekApiKey ?? '',
+        model: deepSeekModel
+      });
       await updateMistakeAiSuggestion(mistake.id, {
         ...suggestion,
         generatedAt: new Date().toISOString()
@@ -810,17 +823,27 @@ function Ranking({ title, items }: { title: string; items: { label: string; coun
 function SettingsPanel({
   demoCount,
   hasDeepSeekApiKey,
+  savedDeepSeekApiKey,
+  savedDeepSeekModel,
   onChanged,
   setMessage
 }: {
   demoCount: number;
   hasDeepSeekApiKey: boolean;
+  savedDeepSeekApiKey?: string;
+  savedDeepSeekModel?: string;
   onChanged: () => Promise<void>;
   setMessage: (value: string) => void;
 }) {
   const [summary, setSummary] = useState<ReturnType<typeof createImportSummary> | null>(null);
   const [pendingPayload, setPendingPayload] = useState<BackupPayload | null>(null);
   const [deepSeekApiKey, setDeepSeekApiKey] = useState('');
+  const [deepSeekModel, setDeepSeekModel] = useState(savedDeepSeekModel || DEFAULT_DEEPSEEK_MODEL);
+  const [aiTesting, setAiTesting] = useState(false);
+
+  useEffect(() => {
+    setDeepSeekModel(savedDeepSeekModel || DEFAULT_DEEPSEEK_MODEL);
+  }, [savedDeepSeekModel]);
 
   async function downloadBackup() {
     const payload = await exportBackup();
@@ -883,14 +906,13 @@ function SettingsPanel({
   }
 
   async function saveAiKey() {
-    if (!deepSeekApiKey.trim()) {
-      setMessage('请输入 DeepSeek API Key');
-      return;
+    if (deepSeekApiKey.trim()) {
+      await saveDeepSeekApiKey(deepSeekApiKey);
     }
-    await saveDeepSeekApiKey(deepSeekApiKey);
+    await saveDeepSeekModel(deepSeekModel || DEFAULT_DEEPSEEK_MODEL);
     setDeepSeekApiKey('');
     await onChanged();
-    setMessage('DeepSeek API Key 已保存');
+    setMessage(deepSeekApiKey.trim() ? 'AI 设置已保存' : '模型名已保存');
   }
 
   async function clearAiKey() {
@@ -900,13 +922,34 @@ function SettingsPanel({
     setMessage('DeepSeek API Key 已清除');
   }
 
+  async function testAiConnection() {
+    if (aiTesting) return;
+    const apiKeyForTest = deepSeekApiKey.trim() || savedDeepSeekApiKey || '';
+    if (!apiKeyForTest && !hasDeepSeekApiKey) {
+      setMessage('请先填写 DeepSeek API Key');
+      return;
+    }
+    setAiTesting(true);
+    try {
+      await testDeepSeekConnection({
+        apiKey: apiKeyForTest,
+        model: deepSeekModel || DEFAULT_DEEPSEEK_MODEL
+      });
+      setMessage('连接成功');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '连接测试失败');
+    } finally {
+      setAiTesting(false);
+    }
+  }
+
   return (
     <section className="stack">
       <BackupNotice />
 
       <article className="panel ai-settings">
         <h2>AI 设置</h2>
-        <p className="muted">API Key 仅保存在当前浏览器本地，不会写入代码或提交到 Git。</p>
+        <p className="muted">API Key 仅保存在当前浏览器。</p>
         <label className="field">
           <span>DeepSeek API Key</span>
           <input
@@ -917,8 +960,19 @@ function SettingsPanel({
             autoComplete="off"
           />
         </label>
+        <label className="field">
+          <span>模型名</span>
+          <input
+            type="text"
+            value={deepSeekModel}
+            onChange={(event) => setDeepSeekModel(event.target.value)}
+            placeholder={DEFAULT_DEEPSEEK_MODEL}
+            autoComplete="off"
+          />
+        </label>
         <div className="action-grid">
-          <button onClick={saveAiKey}>保存 API Key</button>
+          <button onClick={testAiConnection} disabled={aiTesting}>{aiTesting ? '测试中...' : '测试连接'}</button>
+          <button onClick={saveAiKey}>保存设置</button>
           <button onClick={clearAiKey}>清除 API Key</button>
         </div>
       </article>

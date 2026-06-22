@@ -185,7 +185,22 @@ export async function saveDeepSeekApiKey(apiKey: string) {
     dailyGoal: existing?.dailyGoal ?? 20,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
-    deepSeekApiKey: apiKey.trim()
+    deepSeekApiKey: apiKey.trim(),
+    deepSeekModel: existing?.deepSeekModel
+  });
+}
+
+export async function saveDeepSeekModel(model: string) {
+  const db = await getDb();
+  const existing = await db.get('settings', 'default');
+  const now = new Date().toISOString();
+  await db.put('settings', {
+    id: 'default',
+    dailyGoal: existing?.dailyGoal ?? 20,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    deepSeekApiKey: existing?.deepSeekApiKey,
+    deepSeekModel: model.trim()
   });
 }
 
